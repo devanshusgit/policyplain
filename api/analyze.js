@@ -1,26 +1,19 @@
+const https = require('https');
+
 module.exports = async function handler(req, res) {
-  // CORS headers for all origins
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-  // Handle preflight
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
-
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
+  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
     const { policyText } = req.body;
-
     if (!policyText || typeof policyText !== 'string') {
-      return res.status(400).json({ error: 'Missing or invalid policyText' });
+      return res.status(400).json({ error: 'Missing policyText' });
     }
 
-    // Trim to max 8000 characters
     const trimmedText = policyText.trim().slice(0, 8000);
 
     const prompt = `You are an insurance policy analyst in India. Analyze this insurance policy and return ONLY a JSON object — no markdown, no backticks, no explanation. Just raw JSON.
@@ -44,34 +37,46 @@ module.exports = async function handler(req, res) {
 Policy text:
 ${trimmedText}`;
 
-    const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.2,
-        max_tokens: 2000,
-      }),
+    const body = JSON.stringify({
+      model: 'llama-3.3-70b-versatile',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.2,
+      max_tokens: 2000,
     });
 
-    if (!groqResponse.ok) {
-      const errorText = await groqResponse.text();
-      console.error('Groq API error:', groqResponse.status, errorText);
-      return res.status(500).json({ error: 'Groq API error', details: errorText });
+    const groqResult = await new Promise((resolve, reject) => {
+      const options = {
+        hostname: 'api.groq.com',
+        path: '/openai/v1/chat/completions',
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(body),
+        },
+      };
+
+      const reqHttp = https.request(options, (resp) => {
+        let data = '';
+        resp.on('data', chunk => data += chunk);
+        resp.on('end', () => resolve({ status: resp.statusCode, body: data }));
+      });
+
+      reqHttp.on('error', reject);
+      reqHttp.write(body);
+      reqHttp.end();
+    });
+
+    if (groqResult.status !== 200) {
+      console.error('Groq error:', groqResult.status, groqResult.body);
+      return res.status(500).json({ error: 'Groq API error', details: groqResult.body });
     }
 
-    const groqData = await groqResponse.json();
+    const groqData = JSON.parse(groqResult.body);
     const content = groqData.choices?.[0]?.message?.content;
 
-    if (!content) {
-      return res.status(500).json({ error: 'Empty response from Groq' });
-    }
+    if (!content) return res.status(500).json({ error: 'Empty response from Groq' });
 
-    // Strip accidental markdown fences
     const cleaned = content
       .replace(/^```json\s*/i, '')
       .replace(/^```\s*/i, '')
@@ -81,12 +86,12 @@ ${trimmedText}`;
     try {
       const parsed = JSON.parse(cleaned);
       return res.status(200).json(parsed);
-    } catch (parseError) {
+    } catch {
       return res.status(200).json({ error: 'parse_failed', raw: content });
     }
 
   } catch (err) {
-    console.error('Handler error:', err);
+    console.error('Handler error:', err.message);
     return res.status(500).json({ error: 'Internal server error', message: err.message });
   }
 };
