@@ -1,4 +1,4 @@
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   // CORS headers for all origins
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -52,12 +52,7 @@ ${trimmedText}`;
       },
       body: JSON.stringify({
         model: 'llama-3.3-70b-versatile',
-        messages: [
-          {
-            role: 'user',
-            content: prompt,
-          },
-        ],
+        messages: [{ role: 'user', content: prompt }],
         temperature: 0.2,
         max_tokens: 2000,
       }),
@@ -76,23 +71,22 @@ ${trimmedText}`;
       return res.status(500).json({ error: 'Empty response from Groq' });
     }
 
-    // Try to parse JSON
-    try {
-      // Strip any accidental markdown code fences if model added them
-      const cleaned = content
-        .replace(/^```json\s*/i, '')
-        .replace(/^```\s*/i, '')
-        .replace(/```\s*$/i, '')
-        .trim();
+    // Strip accidental markdown fences
+    const cleaned = content
+      .replace(/^```json\s*/i, '')
+      .replace(/^```\s*/i, '')
+      .replace(/```\s*$/i, '')
+      .trim();
 
+    try {
       const parsed = JSON.parse(cleaned);
       return res.status(200).json(parsed);
     } catch (parseError) {
-      console.error('JSON parse failed:', parseError.message);
       return res.status(200).json({ error: 'parse_failed', raw: content });
     }
+
   } catch (err) {
     console.error('Handler error:', err);
     return res.status(500).json({ error: 'Internal server error', message: err.message });
   }
-}
+};
