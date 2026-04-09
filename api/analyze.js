@@ -8,6 +8,11 @@ module.exports = async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
+  // Debug: check key exists
+  if (!process.env.GROQ_API_KEY) {
+    return res.status(500).json({ error: 'GROQ_API_KEY is not set in environment variables' });
+  }
+
   try {
     const { policyText } = req.body;
     if (!policyText || typeof policyText !== 'string') {
